@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 import sys
 import os
 import argparse
+import time
 from typing import List, Dict, Any
 
 class HTMLStripper(HTMLParser):
@@ -160,23 +161,11 @@ def filter_recent_jobs(jobs: List[Dict], hours_back: int = 4) -> List[Dict]:
 
 def send_google_webhook(webhook_url: str, jobs: List[Dict], hours_back: int):
     """
-    Send formatted jobs to Google Chat webhook
+    Send formatted jobs to Google Chat webhook (supports multiple messages)
     """
     if not jobs:
         print("No recent jobs to send")
         return False
-
-    # Google Chat webhook expects specific format
-    message = {
-        "cards": [{
-            "header": {
-                "title": f"🚀 New Microsoft Jobs Alert",
-                "subtitle": f"Found {len(jobs)} new positions in the last {hours_back} hours",
-                "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/44/Microsoft_logo.svg/512px-Microsoft_logo.svg.png"
-            },
-            "sections": []
-        }]
-    }
 
     # Group jobs by profession for better organization
     jobs_by_profession = {}
@@ -186,70 +175,123 @@ def send_google_webhook(webhook_url: str, jobs: List[Dict], hours_back: int):
             jobs_by_profession[profession] = []
         jobs_by_profession[profession].append(job)
 
-    # Create sections for each profession
-    total_jobs_shown = 0
-    for profession, prof_jobs in jobs_by_profession.items():
-        widgets = []
+    # Settings for message batching
+    JOBS_PER_PROFESSION = 10
+    PROFESSIONS_PER_MESSAGE = 4  # Reduced to ensure message doesn't get too large
+    MAX_JOBS_PER_MESSAGE = 40
 
-        # Add up to 10 jobs per profession (increased from 5)
-        for job in prof_jobs[:10]:
-            widget_content = (
-                f"<b>{job.get('title', 'Unknown Title')}</b><br/>"
-                f"📍 {job.get('primary_location', 'N/A')}<br/>"
-                f"🕐 {job.get('hours_ago', 0):.1f}h ago • {job.get('work_flexibility', 'N/A')}<br/>"
-                f"<a href=\"https://jobs.careers.microsoft.com/global/en/job/{job.get('job_id', '')}\">View Job →</a>"
-            )
+    # Create multiple messages if needed
+    messages_to_send = []
+    remaining_professions = list(jobs_by_profession.items())
+    message_num = 1
+    total_messages_needed = (len(jobs_by_profession) + PROFESSIONS_PER_MESSAGE - 1) // PROFESSIONS_PER_MESSAGE
 
-            widgets.append({
-                "textParagraph": {
-                    "text": widget_content
-                }
-            })
-            total_jobs_shown += 1
+    while remaining_professions:
+        # Take next batch of professions
+        batch_professions = remaining_professions[:PROFESSIONS_PER_MESSAGE]
+        remaining_professions = remaining_professions[PROFESSIONS_PER_MESSAGE:]
 
-        section = {
-            "header": f"📂 {profession} ({len(prof_jobs)} jobs)",
-            "widgets": widgets
+        # Create message for this batch
+        batch_jobs_count = sum(len(prof_jobs) for _, prof_jobs in batch_professions)
+
+        # Determine header based on whether this is first message or continuation
+        if message_num == 1:
+            title = f"🚀 New Microsoft Jobs Alert"
+            subtitle = f"Found {len(jobs)} new positions in the last {hours_back} hours"
+        else:
+            title = f"🚀 Microsoft Jobs (Part {message_num} of {total_messages_needed})"
+            subtitle = f"Continued from previous message"
+
+        message = {
+            "cards": [{
+                "header": {
+                    "title": title,
+                    "subtitle": subtitle,
+                    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/44/Microsoft_logo.svg/512px-Microsoft_logo.svg.png"
+                },
+                "sections": []
+            }]
         }
 
-        message["cards"][0]["sections"].append(section)
+        total_jobs_shown_in_message = 0
 
-        # Increase limit to 5 professions (was 3) to show more jobs
-        if len(message["cards"][0]["sections"]) >= 5:
-            break
+        # Add professions to this message
+        for profession, prof_jobs in batch_professions:
+            widgets = []
 
-    # Add summary footer
-    jobs_not_shown = len(jobs) - total_jobs_shown
-    footer_text = f"<i>Showing {total_jobs_shown} of {len(jobs)} jobs • Last checked: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
-    if jobs_not_shown > 0:
-        footer_text += f"<br/><i>({jobs_not_shown} more jobs not shown - check the full listing)</i>"
+            # Add jobs for this profession
+            jobs_to_show = min(JOBS_PER_PROFESSION, len(prof_jobs))
+            for job in prof_jobs[:jobs_to_show]:
+                widget_content = (
+                    f"<b>{job.get('title', 'Unknown Title')}</b><br/>"
+                    f"📍 {job.get('primary_location', 'N/A')}<br/>"
+                    f"🕐 {job.get('hours_ago', 0):.1f}h ago • {job.get('work_flexibility', 'N/A')}<br/>"
+                    f"<a href=\"https://jobs.careers.microsoft.com/global/en/job/{job.get('job_id', '')}\">View Job →</a>"
+                )
 
-    message["cards"][0]["sections"].append({
-        "widgets": [{
-            "textParagraph": {
-                "text": footer_text
+                widgets.append({
+                    "textParagraph": {
+                        "text": widget_content
+                    }
+                })
+                total_jobs_shown_in_message += 1
+
+            section = {
+                "header": f"📂 {profession} ({len(prof_jobs)} total)",
+                "widgets": widgets
             }
-        }]
-    })
 
-    # Send to webhook
-    try:
-        response = requests.post(
-            webhook_url,
-            json=message,
-            headers={'Content-Type': 'application/json'}
-        )
+            message["cards"][0]["sections"].append(section)
 
-        if response.status_code == 200:
-            print(f"✅ Successfully sent {len(jobs)} jobs to webhook")
-            return True
+        # Add footer for this message
+        if message_num == total_messages_needed:
+            # Last message - show final summary
+            footer_text = f"<i>End of {len(jobs)} jobs • {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
         else:
-            print(f"❌ Failed to send webhook: {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ Error sending webhook: {e}")
-        return False
+            # More messages coming
+            footer_text = f"<i>Message {message_num} of {total_messages_needed} • More jobs in next message...</i>"
+
+        message["cards"][0]["sections"].append({
+            "widgets": [{
+                "textParagraph": {
+                    "text": footer_text
+                }
+            }]
+        })
+
+        messages_to_send.append(message)
+        message_num += 1
+
+    # Send all messages
+    all_successful = True
+    for i, message in enumerate(messages_to_send, 1):
+        try:
+            response = requests.post(
+                webhook_url,
+                json=message,
+                headers={'Content-Type': 'application/json'}
+            )
+
+            if response.status_code == 200:
+                print(f"✅ Sent message {i}/{len(messages_to_send)}")
+            else:
+                print(f"❌ Failed to send message {i}: {response.status_code}")
+                all_successful = False
+
+            # Small delay between messages to avoid rate limiting
+            if i < len(messages_to_send):
+                time.sleep(0.5)
+
+        except Exception as e:
+            print(f"❌ Error sending message {i}: {e}")
+            all_successful = False
+
+    if all_successful:
+        print(f"✅ Successfully sent all {len(jobs)} jobs in {len(messages_to_send)} message(s)")
+    else:
+        print(f"⚠️  Some messages failed to send")
+
+    return all_successful
 
 def save_to_csv(jobs, filename='microsoft_jobs.csv'):
     """

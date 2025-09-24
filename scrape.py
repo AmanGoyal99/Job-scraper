@@ -246,34 +246,59 @@ def send_google_webhook(webhook_url: str, jobs: List[Dict], hours_back: int):
 
         messages_to_send.append(message)
 
-    # Send all messages
+    # Send all messages with retry logic
     all_successful = True
     total_jobs_sent = 0
+    MAX_RETRIES = 2
 
     for i, message in enumerate(messages_to_send, 1):
-        try:
-            response = requests.post(
-                webhook_url,
-                json=message,
-                headers={'Content-Type': 'application/json'}
-            )
+        success = False
 
-            if response.status_code == 200:
-                jobs_in_this_message = min(JOBS_PER_MESSAGE, len(jobs) - total_jobs_sent)
-                total_jobs_sent += jobs_in_this_message
-                print(f"✅ Sent message {i}/{len(messages_to_send)} ({jobs_in_this_message} jobs)")
-            else:
-                print(f"❌ Failed to send message {i}: {response.status_code}")
-                print(f"Response: {response.text}")
-                all_successful = False
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                if attempt > 0:
+                    delay = 2 ** attempt  # Exponential backoff: 2, 4 seconds
+                    print(f"🔄 Retrying message {i} in {delay} seconds (attempt {attempt + 1}/{MAX_RETRIES + 1})")
+                    time.sleep(delay)
 
-            # Small delay between messages to avoid rate limiting
-            if i < len(messages_to_send):
-                time.sleep(1)  # Increased delay to avoid rate limits
+                response = requests.post(
+                    webhook_url,
+                    json=message,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=30
+                )
 
-        except Exception as e:
-            print(f"❌ Error sending message {i}: {e}")
+                if response.status_code == 200:
+                    jobs_in_this_message = min(JOBS_PER_MESSAGE, len(jobs) - total_jobs_sent)
+                    total_jobs_sent += jobs_in_this_message
+                    print(f"✅ Sent message {i}/{len(messages_to_send)} ({jobs_in_this_message} jobs)")
+                    success = True
+                    break
+                elif response.status_code == 429:  # Rate limited
+                    print(f"⏳ Rate limited on message {i}, waiting longer...")
+                    time.sleep(5)
+                    continue
+                elif response.status_code >= 500:  # Server error, retry
+                    print(f"🔄 Server error {response.status_code} on message {i}, will retry...")
+                    continue
+                else:
+                    print(f"❌ Failed to send message {i}: {response.status_code}")
+                    print(f"Response: {response.text}")
+                    break
+
+            except requests.exceptions.Timeout:
+                print(f"⏱️  Timeout on message {i}, will retry...")
+                continue
+            except Exception as e:
+                print(f"❌ Error sending message {i}: {e}")
+                break
+
+        if not success:
             all_successful = False
+
+        # Delay between messages to avoid rate limiting
+        if i < len(messages_to_send):
+            time.sleep(3)  # Increased to 3 seconds between messages
 
     if all_successful:
         print(f"✅ Successfully sent all {len(jobs)} jobs in {len(messages_to_send)} message(s)")

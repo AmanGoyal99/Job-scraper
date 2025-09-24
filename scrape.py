@@ -161,46 +161,35 @@ def filter_recent_jobs(jobs: List[Dict], hours_back: int = 4) -> List[Dict]:
 
 def send_google_webhook(webhook_url: str, jobs: List[Dict], hours_back: int):
     """
-    Send formatted jobs to Google Chat webhook (supports multiple messages)
+    Send formatted jobs to Google Chat webhook (4 jobs per message, sends ALL jobs)
     """
     if not jobs:
         print("No recent jobs to send")
         return False
 
-    # Group jobs by profession for better organization
-    jobs_by_profession = {}
-    for job in jobs:
-        profession = job.get('profession', 'Other')
-        if profession not in jobs_by_profession:
-            jobs_by_profession[profession] = []
-        jobs_by_profession[profession].append(job)
+    # Sort jobs by posting date (most recent first)
+    sorted_jobs = sorted(jobs, key=lambda x: x.get('posting_date', ''), reverse=True)
 
     # Settings for message batching
-    JOBS_PER_PROFESSION = 10
-    PROFESSIONS_PER_MESSAGE = 4  # Reduced to ensure message doesn't get too large
-    MAX_JOBS_PER_MESSAGE = 40
+    JOBS_PER_MESSAGE = 4
+    total_messages_needed = (len(sorted_jobs) + JOBS_PER_MESSAGE - 1) // JOBS_PER_MESSAGE
 
-    # Create multiple messages if needed
+    # Create messages
     messages_to_send = []
-    remaining_professions = list(jobs_by_profession.items())
-    message_num = 1
-    total_messages_needed = (len(jobs_by_profession) + PROFESSIONS_PER_MESSAGE - 1) // PROFESSIONS_PER_MESSAGE
 
-    while remaining_professions:
-        # Take next batch of professions
-        batch_professions = remaining_professions[:PROFESSIONS_PER_MESSAGE]
-        remaining_professions = remaining_professions[PROFESSIONS_PER_MESSAGE:]
+    for message_num in range(1, total_messages_needed + 1):
+        # Get jobs for this message
+        start_idx = (message_num - 1) * JOBS_PER_MESSAGE
+        end_idx = min(start_idx + JOBS_PER_MESSAGE, len(sorted_jobs))
+        message_jobs = sorted_jobs[start_idx:end_idx]
 
-        # Create message for this batch
-        batch_jobs_count = sum(len(prof_jobs) for _, prof_jobs in batch_professions)
-
-        # Determine header based on whether this is first message or continuation
-        if message_num == 1:
+        # Determine header
+        if total_messages_needed == 1:
             title = f"🚀 New Microsoft Jobs Alert"
             subtitle = f"Found {len(jobs)} new positions in the last {hours_back} hours"
         else:
             title = f"🚀 Microsoft Jobs (Part {message_num} of {total_messages_needed})"
-            subtitle = f"Continued from previous message"
+            subtitle = f"Jobs {start_idx + 1}-{end_idx} of {len(jobs)} total"
 
         message = {
             "cards": [{
@@ -213,43 +202,39 @@ def send_google_webhook(webhook_url: str, jobs: List[Dict], hours_back: int):
             }]
         }
 
-        total_jobs_shown_in_message = 0
+        # Add jobs as individual sections
+        for i, job in enumerate(message_jobs, 1):
+            job_content = (
+                f"<b>{job.get('title', 'Unknown Title')}</b><br/>"
+                f"📍 {job.get('primary_location', 'N/A')}<br/>"
+                f"💼 {job.get('profession', 'N/A')} | {job.get('discipline', 'N/A')}<br/>"
+                f"🕐 {job.get('hours_ago', 0):.1f}h ago • {job.get('work_flexibility', 'N/A')}<br/>"
+                f"🆔 Job ID: {job.get('job_id', 'N/A')}<br/>"
+                f"<a href=\"https://jobs.careers.microsoft.com/global/en/job/{job.get('job_id', '')}\">Apply Now →</a>"
+            )
 
-        # Add professions to this message
-        for profession, prof_jobs in batch_professions:
-            widgets = []
-
-            # Add jobs for this profession
-            jobs_to_show = min(JOBS_PER_PROFESSION, len(prof_jobs))
-            for job in prof_jobs[:jobs_to_show]:
-                widget_content = (
-                    f"<b>{job.get('title', 'Unknown Title')}</b><br/>"
-                    f"📍 {job.get('primary_location', 'N/A')}<br/>"
-                    f"🕐 {job.get('hours_ago', 0):.1f}h ago • {job.get('work_flexibility', 'N/A')}<br/>"
-                    f"<a href=\"https://jobs.careers.microsoft.com/global/en/job/{job.get('job_id', '')}\">View Job →</a>"
-                )
-
-                widgets.append({
-                    "textParagraph": {
-                        "text": widget_content
-                    }
-                })
-                total_jobs_shown_in_message += 1
+            # Add brief description if available
+            description = job.get('description', '')[:100]
+            if description:
+                job_content += f"<br/><i>{description}...</i>"
 
             section = {
-                "header": f"📂 {profession} ({len(prof_jobs)} total)",
-                "widgets": widgets
+                "header": f"#{start_idx + i}",
+                "widgets": [{
+                    "textParagraph": {
+                        "text": job_content
+                    }
+                }]
             }
 
             message["cards"][0]["sections"].append(section)
 
-        # Add footer for this message
+        # Add footer
         if message_num == total_messages_needed:
-            # Last message - show final summary
-            footer_text = f"<i>End of {len(jobs)} jobs • {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
+            footer_text = f"<i>✅ All {len(jobs)} jobs sent • {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
         else:
-            # More messages coming
-            footer_text = f"<i>Message {message_num} of {total_messages_needed} • More jobs in next message...</i>"
+            remaining_jobs = len(jobs) - end_idx
+            footer_text = f"<i>➡️ {remaining_jobs} more jobs in next message...</i>"
 
         message["cards"][0]["sections"].append({
             "widgets": [{
@@ -260,10 +245,11 @@ def send_google_webhook(webhook_url: str, jobs: List[Dict], hours_back: int):
         })
 
         messages_to_send.append(message)
-        message_num += 1
 
     # Send all messages
     all_successful = True
+    total_jobs_sent = 0
+
     for i, message in enumerate(messages_to_send, 1):
         try:
             response = requests.post(
@@ -273,14 +259,17 @@ def send_google_webhook(webhook_url: str, jobs: List[Dict], hours_back: int):
             )
 
             if response.status_code == 200:
-                print(f"✅ Sent message {i}/{len(messages_to_send)}")
+                jobs_in_this_message = min(JOBS_PER_MESSAGE, len(jobs) - total_jobs_sent)
+                total_jobs_sent += jobs_in_this_message
+                print(f"✅ Sent message {i}/{len(messages_to_send)} ({jobs_in_this_message} jobs)")
             else:
                 print(f"❌ Failed to send message {i}: {response.status_code}")
+                print(f"Response: {response.text}")
                 all_successful = False
 
             # Small delay between messages to avoid rate limiting
             if i < len(messages_to_send):
-                time.sleep(0.5)
+                time.sleep(1)  # Increased delay to avoid rate limits
 
         except Exception as e:
             print(f"❌ Error sending message {i}: {e}")

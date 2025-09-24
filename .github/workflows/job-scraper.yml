@@ -37,7 +37,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        uv sync
+        uv venv
+        uv pip install -r requirements.txt
 
     - name: Run job scraper
       env:

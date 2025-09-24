@@ -1,0 +1,16 @@
+[project]
+name = "micro-job-scraper"
+version = "1.0.0"
+description = "Microsoft job scraper with webhook notifications"
+authors = [{name = "Job Scraper", email = "noreply@example.com"}]
+requires-python = ">=3.8"
+dependencies = [
+    "requests>=2.31.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []

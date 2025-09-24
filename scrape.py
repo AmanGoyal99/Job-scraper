@@ -1,9 +1,12 @@
 import requests
 import json
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 import sys
+import os
+import argparse
+from typing import List, Dict, Any
 
 class HTMLStripper(HTMLParser):
     """Simple HTML tag stripper"""
@@ -129,6 +132,125 @@ def parse_job_data(data):
 
     return jobs
 
+def filter_recent_jobs(jobs: List[Dict], hours_back: int = 4) -> List[Dict]:
+    """
+    Filter jobs posted within the last N hours
+    """
+    current_time = datetime.now(timezone.utc)
+    cutoff_time = current_time - timedelta(hours=hours_back)
+
+    recent_jobs = []
+    for job in jobs:
+        # Parse the posting date string
+        posting_date_str = job.get('posting_date', '')
+        if posting_date_str:
+            try:
+                # Parse ISO format datetime string
+                posting_date = datetime.fromisoformat(posting_date_str.replace('Z', '+00:00'))
+                if posting_date >= cutoff_time:
+                    # Add time difference for display
+                    time_diff = current_time - posting_date
+                    hours_ago = time_diff.total_seconds() / 3600
+                    job['hours_ago'] = round(hours_ago, 1)
+                    recent_jobs.append(job)
+            except Exception as e:
+                print(f"Error parsing date for job {job.get('job_id')}: {e}")
+
+    return recent_jobs
+
+def send_google_webhook(webhook_url: str, jobs: List[Dict], hours_back: int):
+    """
+    Send formatted jobs to Google Chat webhook
+    """
+    if not jobs:
+        print("No recent jobs to send")
+        return False
+
+    # Google Chat webhook expects specific format
+    message = {
+        "cards": [{
+            "header": {
+                "title": f"🚀 New Microsoft Jobs Alert",
+                "subtitle": f"Found {len(jobs)} new positions in the last {hours_back} hours",
+                "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/44/Microsoft_logo.svg/512px-Microsoft_logo.svg.png"
+            },
+            "sections": []
+        }]
+    }
+
+    # Group jobs by profession for better organization
+    jobs_by_profession = {}
+    for job in jobs:
+        profession = job.get('profession', 'Other')
+        if profession not in jobs_by_profession:
+            jobs_by_profession[profession] = []
+        jobs_by_profession[profession].append(job)
+
+    # Create sections for each profession
+    total_jobs_shown = 0
+    for profession, prof_jobs in jobs_by_profession.items():
+        widgets = []
+
+        # Add up to 10 jobs per profession (increased from 5)
+        for job in prof_jobs[:10]:
+            widget_content = (
+                f"<b>{job.get('title', 'Unknown Title')}</b><br/>"
+                f"📍 {job.get('primary_location', 'N/A')}<br/>"
+                f"🕐 {job.get('hours_ago', 0):.1f}h ago • {job.get('work_flexibility', 'N/A')}<br/>"
+                f"<a href=\"https://jobs.careers.microsoft.com/global/en/job/{job.get('job_id', '')}\">View Job →</a>"
+            )
+
+            widgets.append({
+                "textParagraph": {
+                    "text": widget_content
+                }
+            })
+            total_jobs_shown += 1
+
+        section = {
+            "header": f"📂 {profession} ({len(prof_jobs)} jobs)",
+            "widgets": widgets
+        }
+
+        message["cards"][0]["sections"].append(section)
+
+        # Increase limit to 5 professions (was 3) to show more jobs
+        if len(message["cards"][0]["sections"]) >= 5:
+            break
+
+    # Add summary footer
+    jobs_not_shown = len(jobs) - total_jobs_shown
+    footer_text = f"<i>Showing {total_jobs_shown} of {len(jobs)} jobs • Last checked: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
+    if jobs_not_shown > 0:
+        footer_text += f"<br/><i>({jobs_not_shown} more jobs not shown - check the full listing)</i>"
+
+    message["cards"][0]["sections"].append({
+        "widgets": [{
+            "textParagraph": {
+                "text": footer_text
+            }
+        }]
+    })
+
+    # Send to webhook
+    try:
+        response = requests.post(
+            webhook_url,
+            json=message,
+            headers={'Content-Type': 'application/json'}
+        )
+
+        if response.status_code == 200:
+            print(f"✅ Successfully sent {len(jobs)} jobs to webhook")
+            return True
+        else:
+            print(f"❌ Failed to send webhook: {response.status_code}")
+            print(f"Response: {response.text}")
+            return False
+    except Exception as e:
+        print(f"❌ Error sending webhook: {e}")
+        return False
+
 def save_to_csv(jobs, filename='microsoft_jobs.csv'):
     """
     Saves job data to a CSV file
@@ -168,98 +290,154 @@ def process_json_file(filename):
 def main():
     """
     Main function to orchestrate the scraping process
-    Usage:
-        python scrape.py                    # Fetch page 1 (default)
-        python scrape.py 3                  # Fetch pages 1-3
-        python scrape.py 2 5                # Fetch pages 2-5
-        python scrape.py file.json          # Process a JSON file
     """
-    print("Microsoft Job Scraper")
-    print(f"Timestamp: {datetime.now()}")
-    print("-" * 50)
+    parser = argparse.ArgumentParser(description='Microsoft Job Scraper - Fetch and filter Microsoft job listings')
+
+    # Create mutually exclusive group for main operations
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--pages', '-p', type=int, default=1,
+                      help='Number of pages to fetch (default: 1)')
+    group.add_argument('--range', '-r', nargs=2, type=int, metavar=('START', 'END'),
+                      help='Fetch pages from START to END')
+    group.add_argument('--file', '-f', type=str,
+                      help='Process a JSON file instead of fetching from API')
+
+    # Webhook related arguments
+    parser.add_argument('--webhook', '-w', action='store_true',
+                      help='Enable webhook mode to send notifications for recent jobs')
+    parser.add_argument('--hours', type=int, default=4,
+                      help='Hours to look back for recent jobs (default: 4, only with --webhook)')
+    parser.add_argument('--webhook-url', type=str,
+                      help='Google Chat webhook URL (can also be set via WEBHOOK_URL env var)')
+
+    # Output options
+    parser.add_argument('--output', '-o', type=str, default='microsoft_jobs.csv',
+                      help='Output CSV filename (default: microsoft_jobs.csv)')
+    parser.add_argument('--quiet', '-q', action='store_true',
+                      help='Minimal output')
+
+    args = parser.parse_args()
+
+    if not args.quiet:
+        print("Microsoft Job Scraper")
+        print(f"Timestamp: {datetime.now()}")
+        print("-" * 50)
 
     all_jobs = []
 
-    # Parse command line arguments
-    if len(sys.argv) == 1:
-        # No arguments - fetch page 1
-        start_page, end_page = 1, 1
-        fetch_mode = True
-    elif len(sys.argv) == 2:
-        # One argument - either a file or end page
-        arg = sys.argv[1]
-        if arg.endswith('.json'):
-            # Process JSON file
-            print(f"Processing JSON file: {arg}")
-            data = process_json_file(arg)
-            fetch_mode = False
-        else:
-            # Fetch pages 1 to n
-            try:
-                end_page = int(arg)
-                start_page = 1
-                fetch_mode = True
-            except ValueError:
-                print(f"Invalid argument: {arg}")
-                print("Usage: python scrape.py [end_page] or python scrape.py [start_page] [end_page] or python scrape.py file.json")
-                return
-    elif len(sys.argv) == 3:
-        # Two arguments - start and end page
-        try:
-            start_page = int(sys.argv[1])
-            end_page = int(sys.argv[2])
-            fetch_mode = True
-        except ValueError:
-            print("Invalid page numbers")
-            print("Usage: python scrape.py [start_page] [end_page]")
-            return
-    else:
-        print("Too many arguments")
-        print("Usage: python scrape.py [end_page] or python scrape.py [start_page] [end_page] or python scrape.py file.json")
-        return
-
-    if fetch_mode:
-        # Fetch from API
-        print(f"Fetching job listings from Microsoft API (pages {start_page}-{end_page})...")
-
-        for page in range(start_page, end_page + 1):
-            print(f"Fetching page {page}...")
-            data = fetch_microsoft_jobs(page=page, page_size=20)
-
-            if data:
-                jobs = parse_job_data(data)
-                all_jobs.extend(jobs)
-                print(f"  Found {len(jobs)} jobs on page {page}")
-            else:
-                print(f"  Failed to fetch page {page}")
-
-        jobs = all_jobs
-    else:
-        # Process single JSON file
+    # Determine fetch mode and page range
+    if args.file:
+        # Process JSON file
+        if not args.quiet:
+            print(f"Processing JSON file: {args.file}")
+        data = process_json_file(args.file)
         if data:
-            print("Parsing job data...")
             jobs = parse_job_data(data)
         else:
             jobs = []
+    else:
+        # Determine page range
+        if args.range:
+            start_page, end_page = args.range
+        else:
+            start_page = 1
+            end_page = args.pages
+
+        # Fetch from API
+        if not args.quiet:
+            print(f"Fetching job listings from Microsoft API (pages {start_page}-{end_page})...")
+
+        for page in range(start_page, end_page + 1):
+            if not args.quiet:
+                print(f"Fetching page {page}...")
+            data = fetch_microsoft_jobs(page=page, page_size=20)
+
+            if data:
+                page_jobs = parse_job_data(data)
+                all_jobs.extend(page_jobs)
+                if not args.quiet:
+                    print(f"  Found {len(page_jobs)} jobs on page {page}")
+            else:
+                if not args.quiet:
+                    print(f"  Failed to fetch page {page}")
+
+        jobs = all_jobs
 
     if jobs:
-        print(f"\nTotal jobs found: {len(jobs)}")
+        if not args.quiet:
+            print(f"\nTotal jobs found: {len(jobs)}")
 
-        # Save to CSV
-        save_to_csv(jobs)
+        # Webhook mode: filter recent jobs and send notification
+        if args.webhook:
+            # Get webhook URL from argument or environment
+            webhook_url = args.webhook_url or os.getenv('WEBHOOK_URL', '')
 
-        # Display first few jobs
-        print("\nFirst 5 job listings:")
-        print("-" * 50)
-        for i, job in enumerate(jobs[:5], 1):
-            print(f"\n{i}. {job['title']}")
-            print(f"   Job ID: {job['job_id']}")
-            print(f"   Location: {job['primary_location']}")
-            print(f"   Work Flexibility: {job['work_flexibility']}")
-            print(f"   Employment Type: {job['employment_type']}")
-            print(f"   Profession: {job['profession']}")
+            if not webhook_url:
+                print("\n⚠️  No webhook URL provided!")
+                print("Provide webhook URL via:")
+                print("  1. Command line: --webhook-url 'your_webhook_url'")
+                print("  2. Environment: export WEBHOOK_URL='your_webhook_url'")
+                print("\nExample:")
+                print("  python scrape.py --webhook --hours 6 --pages 5 --webhook-url 'https://...'")
+                return
+
+            # Filter recent jobs
+            if not args.quiet:
+                print(f"\nFiltering jobs posted in the last {args.hours} hours...")
+            recent_jobs = filter_recent_jobs(jobs, hours_back=args.hours)
+
+            if recent_jobs:
+                if not args.quiet:
+                    print(f"Found {len(recent_jobs)} recent jobs")
+
+                    # Sort by posting date (most recent first)
+                    recent_jobs.sort(key=lambda x: x.get('posting_date', ''), reverse=True)
+
+                    # Display summary
+                    print("\nRecent jobs summary:")
+                    for i, job in enumerate(recent_jobs[:5], 1):
+                        print(f"  {i}. {job['title']} - {job['hours_ago']:.1f}h ago")
+
+                    if len(recent_jobs) > 5:
+                        print(f"  ... and {len(recent_jobs) - 5} more")
+
+                    print(f"\nSending to Google Chat webhook...")
+
+                # Send webhook notification
+                success = send_google_webhook(webhook_url, recent_jobs, args.hours)
+
+                if not args.quiet:
+                    if success:
+                        print("✅ Webhook notification sent successfully!")
+                    else:
+                        print("❌ Failed to send webhook notification")
+            else:
+                if not args.quiet:
+                    print(f"No jobs found in the last {args.hours} hours")
+
+                # Send a "no new jobs" notification
+                message = {
+                    "text": f"📭 No new Microsoft jobs found in the last {args.hours} hours.\nLast checked: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                }
+                requests.post(webhook_url, json=message)
+        else:
+            # Normal mode: save to CSV
+            save_to_csv(jobs, filename=args.output)
+
+            if not args.quiet:
+                # Display first few jobs
+                print("\nFirst 5 job listings:")
+                print("-" * 50)
+                for i, job in enumerate(jobs[:5], 1):
+                    print(f"\n{i}. {job['title']}")
+                    print(f"   Job ID: {job['job_id']}")
+                    print(f"   Location: {job['primary_location']}")
+                    print(f"   Work Flexibility: {job['work_flexibility']}")
+                    print(f"   Employment Type: {job['employment_type']}")
+                    print(f"   Profession: {job['profession']}")
     else:
-        print("No jobs found in the data")
+        if not args.quiet:
+            print("No jobs found in the data")
 
 if __name__ == "__main__":
     main()

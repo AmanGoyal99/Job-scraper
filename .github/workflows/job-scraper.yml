@@ -1,4 +1,4 @@
-name: Microsoft Job Scraper
+name: Job Scraper
 
 on:
   schedule:
@@ -6,6 +6,15 @@ on:
     - cron: '5 */2 * * *'
   workflow_dispatch: # Allow manual trigger
     inputs:
+      scrapers:
+        description: 'Which scrapers to run'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - 'both'
+          - 'microsoft'
+          - 'amazon'
       hours_back:
         description: 'Hours to look back for jobs'
         required: false
@@ -40,7 +49,8 @@ jobs:
         uv venv
         uv pip install -r requirements.txt
 
-    - name: Run job scraper
+    - name: Run Microsoft job scraper
+      if: ${{ github.event.inputs.scrapers == 'microsoft' || github.event.inputs.scrapers == 'both' || github.event.inputs.scrapers == '' }}
       env:
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
       run: |
@@ -48,14 +58,32 @@ jobs:
         HOURS_BACK="${{ github.event.inputs.hours_back || '2' }}"
         PAGES="${{ github.event.inputs.pages || '3' }}"
 
-        echo "Running scraper with hours_back=${HOURS_BACK}, pages=${PAGES}"
+        echo "Running Microsoft scraper with hours_back=${HOURS_BACK}, pages=${PAGES}"
 
         uv run python scrape.py --webhook \
           --hours ${HOURS_BACK} \
           --pages ${PAGES} \
           --quiet
 
+    - name: Run Amazon job scraper
+      if: ${{ github.event.inputs.scrapers == 'amazon' || github.event.inputs.scrapers == 'both' || github.event.inputs.scrapers == '' }}
+      env:
+        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+      run: |
+        # Use manual input values or defaults for scheduled runs
+        HOURS_BACK="${{ github.event.inputs.hours_back || '2' }}"
+        PAGES="${{ github.event.inputs.pages || '3' }}"
+
+        echo "Running Amazon scraper with hours_back=${HOURS_BACK}, pages=${PAGES}"
+
+        uv run python amazon.py --webhook \
+          --hours ${HOURS_BACK} \
+          --pages ${PAGES} \
+          --quiet
+
     - name: Log completion
       run: |
-        echo "Job scraper completed at $(date)"
+        SCRAPERS="${{ github.event.inputs.scrapers || 'both' }}"
+        echo "Job scrapers completed at $(date)"
+        echo "Scrapers run: ${SCRAPERS}"
         echo "Next run scheduled for $(date -d '+2 hours')"

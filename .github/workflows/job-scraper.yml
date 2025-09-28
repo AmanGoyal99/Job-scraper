@@ -123,7 +123,6 @@ jobs:
           --hours ${HOURS_BACK} \
           --pages ${PAGES} \
           --quiet
-
     - name: Log completion
       run: |
         SCRAPERS="${{ github.event.inputs.scrapers || 'all' }}"

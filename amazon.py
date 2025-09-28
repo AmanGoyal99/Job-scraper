@@ -1,6 +1,7 @@
 import requests
 import json
 import csv
+import re
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 import sys
@@ -147,20 +148,26 @@ def filter_recent_jobs(jobs: List[Dict], hours_back: int = 4) -> List[Dict]:
         posting_date_str = job.get('posting_date', '')
         updated_time = job.get('updated_time', '')
 
-        # Try to calculate hours ago from updated_time (e.g., "2 days")
+        # Try to calculate hours ago from updated_time (e.g., "2 days", "about 13 hours")
         try:
             if updated_time:
                 if 'hour' in updated_time:
-                    hours = int(updated_time.split()[0])
-                    job['hours_ago'] = hours
-                    if hours <= hours_back:
-                        recent_jobs.append(job)
+                    # Extract number from strings like "2 hours", "about 13 hours"
+                    numbers = re.findall(r'\d+', updated_time)
+                    if numbers:
+                        hours = int(numbers[0])
+                        job['hours_ago'] = hours
+                        if hours <= hours_back:
+                            recent_jobs.append(job)
                 elif 'day' in updated_time:
-                    days = int(updated_time.split()[0])
-                    hours = days * 24
-                    job['hours_ago'] = hours
-                    if hours <= hours_back:
-                        recent_jobs.append(job)
+                    # Extract number from strings like "2 days", "about 3 days"
+                    numbers = re.findall(r'\d+', updated_time)
+                    if numbers:
+                        days = int(numbers[0])
+                        hours = days * 24
+                        job['hours_ago'] = hours
+                        if hours <= hours_back:
+                            recent_jobs.append(job)
                 else:
                     # If we can't parse, include it as potentially recent
                     job['hours_ago'] = 0

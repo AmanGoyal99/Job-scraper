@@ -19,9 +19,13 @@ on:
           - 'microsoft'
           - 'amazon'
           - 'apple'
+          - 'nvidia'
           - 'microsoft+amazon'
           - 'microsoft+apple'
+          - 'microsoft+nvidia'
           - 'amazon+apple'
+          - 'amazon+nvidia'
+          - 'apple+nvidia'
       hours_back:
         description: 'Hours to look back for jobs'
         required: false
@@ -57,7 +61,7 @@ jobs:
         uv pip install -r requirements.txt
 
     - name: Run Microsoft job scraper
-      if: ${{ github.event.inputs.scrapers == 'microsoft' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+amazon' || github.event.inputs.scrapers == 'microsoft+apple' || github.event.inputs.scrapers == '' }}
+      if: ${{ github.event.inputs.scrapers == 'microsoft' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+amazon' || github.event.inputs.scrapers == 'microsoft+apple' || github.event.inputs.scrapers == 'microsoft+nvidia' || github.event.inputs.scrapers == '' }}
       env:
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
       run: |
@@ -73,7 +77,7 @@ jobs:
           --quiet
 
     - name: Run Amazon job scraper
-      if: ${{ github.event.inputs.scrapers == 'amazon' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+amazon' || github.event.inputs.scrapers == 'amazon+apple' || github.event.inputs.scrapers == '' }}
+      if: ${{ github.event.inputs.scrapers == 'amazon' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+amazon' || github.event.inputs.scrapers == 'amazon+apple' || github.event.inputs.scrapers == 'amazon+nvidia' || github.event.inputs.scrapers == '' }}
       env:
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
       run: |
@@ -89,7 +93,7 @@ jobs:
           --quiet
 
     - name: Run Apple job scraper
-      if: ${{ github.event.inputs.scrapers == 'apple' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+apple' || github.event.inputs.scrapers == 'amazon+apple' || github.event.inputs.scrapers == '' }}
+      if: ${{ github.event.inputs.scrapers == 'apple' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+apple' || github.event.inputs.scrapers == 'amazon+apple' || github.event.inputs.scrapers == 'apple+nvidia' || github.event.inputs.scrapers == '' }}
       env:
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
       run: |
@@ -100,6 +104,22 @@ jobs:
         echo "Running Apple scraper with hours_back=${HOURS_BACK}, pages=${PAGES}"
 
         uv run python apple.py --webhook \
+          --hours ${HOURS_BACK} \
+          --pages ${PAGES} \
+          --quiet
+
+    - name: Run NVIDIA job scraper
+      if: ${{ github.event.inputs.scrapers == 'nvidia' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+nvidia' || github.event.inputs.scrapers == 'amazon+nvidia' || github.event.inputs.scrapers == 'apple+nvidia' || github.event.inputs.scrapers == '' }}
+      env:
+        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+      run: |
+        # Use manual input values or defaults for scheduled runs
+        HOURS_BACK="${{ github.event.inputs.hours_back || '2' }}"
+        PAGES="${{ github.event.inputs.pages || '3' }}"
+
+        echo "Running NVIDIA scraper with hours_back=${HOURS_BACK}, pages=${PAGES}"
+
+        uv run python nvidia.py --webhook \
           --hours ${HOURS_BACK} \
           --pages ${PAGES} \
           --quiet

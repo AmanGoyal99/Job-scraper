@@ -1,6 +1,9 @@
 name: Job Scraper
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     # Run every 2 hours at :05 minutes past the hour
     - cron: '5 */2 * * *'

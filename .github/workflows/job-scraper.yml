@@ -12,12 +12,16 @@ on:
       scrapers:
         description: 'Which scrapers to run'
         required: false
-        default: 'both'
+        default: 'all'
         type: choice
         options:
-          - 'both'
+          - 'all'
           - 'microsoft'
           - 'amazon'
+          - 'apple'
+          - 'microsoft+amazon'
+          - 'microsoft+apple'
+          - 'amazon+apple'
       hours_back:
         description: 'Hours to look back for jobs'
         required: false
@@ -53,7 +57,7 @@ jobs:
         uv pip install -r requirements.txt
 
     - name: Run Microsoft job scraper
-      if: ${{ github.event.inputs.scrapers == 'microsoft' || github.event.inputs.scrapers == 'both' || github.event.inputs.scrapers == '' }}
+      if: ${{ github.event.inputs.scrapers == 'microsoft' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+amazon' || github.event.inputs.scrapers == 'microsoft+apple' || github.event.inputs.scrapers == '' }}
       env:
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
       run: |
@@ -69,7 +73,7 @@ jobs:
           --quiet
 
     - name: Run Amazon job scraper
-      if: ${{ github.event.inputs.scrapers == 'amazon' || github.event.inputs.scrapers == 'both' || github.event.inputs.scrapers == '' }}
+      if: ${{ github.event.inputs.scrapers == 'amazon' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+amazon' || github.event.inputs.scrapers == 'amazon+apple' || github.event.inputs.scrapers == '' }}
       env:
         WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
       run: |
@@ -84,9 +88,25 @@ jobs:
           --pages ${PAGES} \
           --quiet
 
+    - name: Run Apple job scraper
+      if: ${{ github.event.inputs.scrapers == 'apple' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+apple' || github.event.inputs.scrapers == 'amazon+apple' || github.event.inputs.scrapers == '' }}
+      env:
+        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+      run: |
+        # Use manual input values or defaults for scheduled runs
+        HOURS_BACK="${{ github.event.inputs.hours_back || '2' }}"
+        PAGES="${{ github.event.inputs.pages || '3' }}"
+
+        echo "Running Apple scraper with hours_back=${HOURS_BACK}, pages=${PAGES}"
+
+        uv run python apple.py --webhook \
+          --hours ${HOURS_BACK} \
+          --pages ${PAGES} \
+          --quiet
+
     - name: Log completion
       run: |
-        SCRAPERS="${{ github.event.inputs.scrapers || 'both' }}"
+        SCRAPERS="${{ github.event.inputs.scrapers || 'all' }}"
         echo "Job scrapers completed at $(date)"
         echo "Scrapers run: ${SCRAPERS}"
         echo "Next run scheduled for $(date -d '+2 hours')"

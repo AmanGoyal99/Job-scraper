@@ -63,7 +63,7 @@ jobs:
     - name: Run Microsoft job scraper
       if: ${{ github.event.inputs.scrapers == 'microsoft' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+amazon' || github.event.inputs.scrapers == 'microsoft+apple' || github.event.inputs.scrapers == 'microsoft+nvidia' || github.event.inputs.scrapers == '' }}
       env:
-        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        WEBHOOK_URL: ${{ secrets.MICROSOFT_WEBHOOK_URL }}
       run: |
         # Use manual input values or defaults for scheduled runs
         HOURS_BACK="${{ github.event.inputs.hours_back || '2' }}"
@@ -79,7 +79,7 @@ jobs:
     - name: Run Amazon job scraper
       if: ${{ github.event.inputs.scrapers == 'amazon' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+amazon' || github.event.inputs.scrapers == 'amazon+apple' || github.event.inputs.scrapers == 'amazon+nvidia' || github.event.inputs.scrapers == '' }}
       env:
-        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        WEBHOOK_URL: ${{ secrets.AMAZON_WEBHOOK_URL }}
       run: |
         # Use manual input values or defaults for scheduled runs
         HOURS_BACK="${{ github.event.inputs.hours_back || '2' }}"
@@ -95,7 +95,7 @@ jobs:
     - name: Run Apple job scraper
       if: ${{ github.event.inputs.scrapers == 'apple' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+apple' || github.event.inputs.scrapers == 'amazon+apple' || github.event.inputs.scrapers == 'apple+nvidia' || github.event.inputs.scrapers == '' }}
       env:
-        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        WEBHOOK_URL: ${{ secrets.APPLE_WEBHOOK_URL }}
       run: |
         # Use manual input values or defaults for scheduled runs
         HOURS_BACK="${{ github.event.inputs.hours_back || '2' }}"
@@ -111,7 +111,7 @@ jobs:
     - name: Run NVIDIA job scraper
       if: ${{ github.event.inputs.scrapers == 'nvidia' || github.event.inputs.scrapers == 'all' || github.event.inputs.scrapers == 'microsoft+nvidia' || github.event.inputs.scrapers == 'amazon+nvidia' || github.event.inputs.scrapers == 'apple+nvidia' || github.event.inputs.scrapers == '' }}
       env:
-        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        WEBHOOK_URL: ${{ secrets.NVIDIA_WEBHOOK_URL }}
       run: |
         # Use manual input values or defaults for scheduled runs
         HOURS_BACK="${{ github.event.inputs.hours_back || '2' }}"

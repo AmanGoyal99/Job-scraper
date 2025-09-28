@@ -155,7 +155,7 @@ def parse_job_data(data):
             'job_family': team_info.get('teamCode', ''),
             'job_schedule_type': 'Full-Time',
             'description': clean_description.replace('\n', ' ').replace('\r', '').replace('\t', ' '),
-            'job_path': f"/en-us/details/{job.get('transformedPostingTitle', '')}/{job.get('reqId', '')}",
+            'job_path': f"/en-us/details/{job.get('reqId', '')}/{job.get('transformedPostingTitle', '')}?team={team_info.get('teamCode', '')}",
             'updated_time': f"{hours_ago:.1f} hours",
             'hours_ago': hours_ago
         }

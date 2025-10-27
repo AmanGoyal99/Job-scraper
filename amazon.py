@@ -458,12 +458,6 @@ def main():
             else:
                 if not args.quiet:
                     print(f"No jobs found in the last {args.hours} hours")
-
-                # Send a "no new jobs" notification
-                message = {
-                    "text": f"📭 No new Amazon jobs found in the last {args.hours} hours.\nLast checked: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}"
-                }
-                requests.post(webhook_url, json=message)
         else:
             # Normal mode: save to CSV
             save_to_csv(jobs, filename=args.output)

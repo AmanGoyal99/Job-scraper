@@ -4,9 +4,9 @@ on:
   push:
     branches:
       - main
-  schedule:
+  # schedule:
     # Run every 2 hours at :05 minutes past the hour
-    - cron: '5 */2 * * *'
+    # - cron: '5 */2 * * *'
   workflow_dispatch: # Allow manual trigger
     inputs:
       scrapers:
